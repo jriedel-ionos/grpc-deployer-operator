@@ -1,0 +1,14 @@
+apiVersion: operator.my.domain/v1
+kind: Operator
+metadata:
+  labels:
+    app.kubernetes.io/name: operator
+    app.kubernetes.io/instance: operator-sample
+    app.kubernetes.io/part-of: grpc-deployer-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: grpc-deployer-operator
+  name: operator-sample
+spec:
+  port: 8080
+  replicas: 3
+  returnValue: "hallo"

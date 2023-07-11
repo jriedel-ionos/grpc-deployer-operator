@@ -21,7 +21,7 @@ import (
 )
 
 const (
-  OperatorFinalizer = "operator.finalizer"
+	OperatorFinalizer = "operator.finalizer"
 )
 
 // OperatorSpec defines the desired state of Operator

@@ -143,6 +143,12 @@ func (r *OperatorReconciler) deleteServerDeployment(ctx context.Context, operato
 		}
 	}
 
+	if controllerutil.RemoveFinalizer(deployment, operatorv1.OperatorFinalizer+"/server") {
+		if err := r.Update(ctx, deployment); err != nil {
+			return err
+		}
+	}
+
 	err := r.Delete(ctx, deployment)
 	if err != nil {
 		return err
@@ -187,6 +193,12 @@ func (r *OperatorReconciler) deleteFrontendDeployment(ctx context.Context, opera
 		}
 
 		return err
+	}
+
+	if controllerutil.RemoveFinalizer(deployment, operatorv1.OperatorFinalizer+"/frontend") {
+		if err := r.Update(ctx, deployment); err != nil {
+			return err
+		}
 	}
 
 	err := r.Delete(ctx, deployment)

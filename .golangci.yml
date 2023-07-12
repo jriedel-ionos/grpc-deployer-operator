@@ -1,0 +1,20 @@
+linters:
+  enable:
+    - bodyclose
+    - dupl
+    - gci
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofumpt
+    - goimports
+    - lll
+    - loggercheck
+    - misspell
+    - nilerr
+    - nosprintfhostport
+    - revive
+    - stylecheck
+    - unconvert
+    - unparam
+    - whitespace

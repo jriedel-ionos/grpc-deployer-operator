@@ -396,12 +396,6 @@ func (r *OperatorReconciler) createOrUpdateFrontendService(ctx context.Context, 
 		return err
 	}
 
-	key := client.ObjectKeyFromObject(service)
-	err := r.Client.Get(ctx, key, service)
-	if err != nil {
-		return err
-	}
-
 	return r.Client.Status().Update(ctx, operator)
 }
 

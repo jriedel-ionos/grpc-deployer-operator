@@ -19,7 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
-	operatorv1 "grpc-deployer-operator/api/v1"
+
+	operatorv1 "github.com/jriedel-ionos/grpc-deployer-operator/api/v1"
 	v1 "k8s.io/api/apps/v1"
 	v12 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -100,11 +101,7 @@ func (r *OperatorReconciler) reconcileEnsure(ctx context.Context, operator *oper
 		return err
 	}
 
-	if err := r.createOrUpdateFrontendService(ctx, operator); err != nil {
-		return err
-	}
-
-	return nil
+	return r.createOrUpdateFrontendService(ctx, operator)
 }
 
 func (r *OperatorReconciler) reconcileDelete(ctx context.Context, operator *operatorv1.Operator) error {
@@ -120,7 +117,7 @@ func (r *OperatorReconciler) reconcileDelete(ctx context.Context, operator *oper
 		return err
 	}
 
-	if err := r.deleteFrontendDeployment(ctx, operator); err != nil {
+	if err := r.deleteServerDeployment(ctx, operator); err != nil {
 		return err
 	}
 
@@ -318,7 +315,9 @@ func (r *OperatorReconciler) createOrUpdateServerService(ctx context.Context, op
 	return nil
 }
 
-func (r *OperatorReconciler) createOrUpdateFrontendDeployment(ctx context.Context, operator *operatorv1.Operator) error {
+func (r *OperatorReconciler) createOrUpdateFrontendDeployment(ctx context.Context,
+	operator *operatorv1.Operator,
+) error {
 	replicas := operator.Spec.Replicas
 	deployment := &v1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -403,11 +402,7 @@ func (r *OperatorReconciler) createOrUpdateFrontendService(ctx context.Context, 
 		return err
 	}
 
-	if err := r.Client.Status().Update(ctx, operator); err != nil {
-		return err
-	}
-
-	return nil
+	return r.Client.Status().Update(ctx, operator)
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -21,8 +21,8 @@ import (
 	"fmt"
 
 	operatorv1 "github.com/jriedel-ionos/grpc-deployer-operator/api/v1"
-	v1 "k8s.io/api/apps/v1"
-	v12 "k8s.io/api/core/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -132,7 +132,7 @@ func (r *OperatorReconciler) reconcileDelete(ctx context.Context, operator *oper
 
 func (r *OperatorReconciler) deleteServerDeployment(ctx context.Context, operator *operatorv1.Operator) error {
 	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-server"}
-	deployment := &v1.Deployment{}
+	deployment := &appsv1.Deployment{}
 
 	if err := r.Get(ctx, key, deployment); err != nil {
 		if errors.IsNotFound(err) {
@@ -156,7 +156,7 @@ func (r *OperatorReconciler) deleteServerDeployment(ctx context.Context, operato
 
 func (r *OperatorReconciler) deleteServerService(ctx context.Context, operator *operatorv1.Operator) error {
 	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-server"}
-	service := &v12.Service{}
+	service := &corev1.Service{}
 
 	if err := r.Get(ctx, key, service); err != nil {
 		if errors.IsNotFound(err) {
@@ -182,7 +182,7 @@ func (r *OperatorReconciler) deleteServerService(ctx context.Context, operator *
 
 func (r *OperatorReconciler) deleteFrontendDeployment(ctx context.Context, operator *operatorv1.Operator) error {
 	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-frontend"}
-	deployment := &v1.Deployment{}
+	deployment := &appsv1.Deployment{}
 
 	if err := r.Get(ctx, key, deployment); err != nil {
 		if errors.IsNotFound(err) {
@@ -208,7 +208,7 @@ func (r *OperatorReconciler) deleteFrontendDeployment(ctx context.Context, opera
 
 func (r *OperatorReconciler) deleteFrontendService(ctx context.Context, operator *operatorv1.Operator) error {
 	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-frontend"}
-	service := &v12.Service{}
+	service := &corev1.Service{}
 
 	if err := r.Get(ctx, key, service); err != nil {
 		if errors.IsNotFound(err) {
@@ -235,7 +235,7 @@ func (r *OperatorReconciler) deleteFrontendService(ctx context.Context, operator
 func (r *OperatorReconciler) createOrUpdateServerDeployment(ctx context.Context, operator *operatorv1.Operator) error {
 	replicas := operator.Spec.Replicas
 
-	deployment := &v1.Deployment{
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      operator.Name + "-server",
 			Namespace: operator.Namespace,
@@ -245,35 +245,35 @@ func (r *OperatorReconciler) createOrUpdateServerDeployment(ctx context.Context,
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		controllerutil.AddFinalizer(deployment, operatorv1.OperatorFinalizer+"/server")
 
-		value := v12.EnvVar{Name: "TEST"}
+		value := corev1.EnvVar{Name: "TEST"}
 
 		value.Value = operator.Spec.ReturnValue
 
-		deployment.Spec = v1.DeploymentSpec{
+		deployment.Spec = appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app": operator.Name + "-server",
 				},
 			},
-			Template: v12.PodTemplateSpec{
+			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						"app": operator.Name + "-server",
 					},
 				},
-				Spec: v12.PodSpec{
-					Containers: []v12.Container{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
 						{
 							Name:  "grpc-server",
 							Image: "ghcr.io/jriedel-ionos/rampup-challenge-grpc/server:latest",
-							Ports: []v12.ContainerPort{
+							Ports: []corev1.ContainerPort{
 								{
 									ContainerPort: 8080,
-									Protocol:      v12.ProtocolTCP,
+									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							Env: []v12.EnvVar{value},
+							Env: []corev1.EnvVar{value},
 						},
 					},
 				},
@@ -287,7 +287,7 @@ func (r *OperatorReconciler) createOrUpdateServerDeployment(ctx context.Context,
 }
 
 func (r *OperatorReconciler) createOrUpdateServerService(ctx context.Context, operator *operatorv1.Operator) error {
-	service := &v12.Service{
+	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      operator.Name + "-server",
 			Namespace: operator.Namespace,
@@ -296,11 +296,11 @@ func (r *OperatorReconciler) createOrUpdateServerService(ctx context.Context, op
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
 		controllerutil.AddFinalizer(service, operatorv1.OperatorFinalizer+"/server-service")
-		service.Spec = v12.ServiceSpec{
+		service.Spec = corev1.ServiceSpec{
 			Selector: map[string]string{
 				"app": operator.Name + "-server",
 			},
-			Ports: []v12.ServicePort{
+			Ports: []corev1.ServicePort{
 				{
 					Port:       8080,
 					TargetPort: intstr.FromInt(8080),
@@ -319,7 +319,7 @@ func (r *OperatorReconciler) createOrUpdateFrontendDeployment(ctx context.Contex
 	operator *operatorv1.Operator,
 ) error {
 	replicas := operator.Spec.Replicas
-	deployment := &v1.Deployment{
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      operator.Name + "-frontend",
 			Namespace: operator.Namespace,
@@ -328,30 +328,30 @@ func (r *OperatorReconciler) createOrUpdateFrontendDeployment(ctx context.Contex
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		controllerutil.AddFinalizer(deployment, operatorv1.OperatorFinalizer+"/frontend")
-		deployment.Spec = v1.DeploymentSpec{
+		deployment.Spec = appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app": operator.Name + "-frontend",
 				},
 			},
-			Template: v12.PodTemplateSpec{
+			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
 						"app": operator.Name + "-frontend",
 					},
 				},
-				Spec: v12.PodSpec{
-					Containers: []v12.Container{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
 						{
 							Name:  "grpc-frontend",
 							Image: "ghcr.io/jriedel-ionos/rampup-challenge-grpc/frontend:latest",
-							Ports: []v12.ContainerPort{
+							Ports: []corev1.ContainerPort{
 								{
 									ContainerPort: 8081,
 								},
 							},
-							Env: []v12.EnvVar{
+							Env: []corev1.EnvVar{
 								{
 									Name:  "TARGET",
 									Value: fmt.Sprintf("%s.%s.svc.cluster.local:8080", operator.Name+"-server", operator.Namespace),
@@ -370,7 +370,7 @@ func (r *OperatorReconciler) createOrUpdateFrontendDeployment(ctx context.Contex
 }
 
 func (r *OperatorReconciler) createOrUpdateFrontendService(ctx context.Context, operator *operatorv1.Operator) error {
-	service := &v12.Service{
+	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      operator.Name + "-frontend",
 			Namespace: operator.Namespace,
@@ -379,12 +379,12 @@ func (r *OperatorReconciler) createOrUpdateFrontendService(ctx context.Context, 
 
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
 		controllerutil.AddFinalizer(service, operatorv1.OperatorFinalizer+"/frontend-service")
-		service.Spec = v12.ServiceSpec{
+		service.Spec = corev1.ServiceSpec{
 			Selector: map[string]string{
 				"app": operator.Name + "-frontend",
 			},
-			Type: v12.ServiceTypeLoadBalancer,
-			Ports: []v12.ServicePort{
+			Type: corev1.ServiceTypeLoadBalancer,
+			Ports: []corev1.ServicePort{
 				{
 					Port:       8081,
 					TargetPort: intstr.FromInt(8081),

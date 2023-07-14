@@ -105,48 +105,73 @@ func (r *OperatorReconciler) reconcileEnsure(ctx context.Context, operator *oper
 }
 
 func (r *OperatorReconciler) reconcileDelete(ctx context.Context, operator *operatorv1.Operator) error {
-	if err := r.deleteFrontendService(ctx, operator); err != nil {
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: operator.Namespace,
+			Name:      operator.Name + "-server",
+		},
+	}
+
+	if err := r.deleteResource(ctx, deployment, operatorv1.OperatorFinalizer+"/server"); err != nil {
 		return err
 	}
 
-	if err := r.deleteFrontendDeployment(ctx, operator); err != nil {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: operator.Namespace,
+			Name:      operator.Name + "-server",
+		},
+	}
+
+	if err := r.deleteResource(ctx, service, operatorv1.OperatorFinalizer+"/server-service"); err != nil {
 		return err
 	}
 
-	if err := r.deleteServerService(ctx, operator); err != nil {
+	frontendDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: operator.Namespace,
+			Name:      operator.Name + "-frontend",
+		},
+	}
+
+	if err := r.deleteResource(ctx, frontendDeployment, operatorv1.OperatorFinalizer+"/frontend"); err != nil {
 		return err
 	}
 
-	if err := r.deleteServerDeployment(ctx, operator); err != nil {
+	frontendService := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: operator.Namespace,
+			Name:      operator.Name + "-frontend",
+		},
+	}
+
+	if err := r.deleteResource(ctx, frontendService, operatorv1.OperatorFinalizer+"/frontend-service"); err != nil {
 		return err
 	}
 
-	if controllerutil.RemoveFinalizer(operator, operatorv1.OperatorFinalizer) {
-		if err := r.Update(ctx, operator); err != nil {
-			return err
-		}
-	}
+	// remove finalizer from operator CRD
+	controllerutil.RemoveFinalizer(operator, operatorv1.OperatorFinalizer)
 
-	return nil
+	return r.Update(ctx, operator)
 }
 
-func (r *OperatorReconciler) deleteServerDeployment(ctx context.Context, operator *operatorv1.Operator) error {
-	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-server"}
-	deployment := &appsv1.Deployment{}
-
-	if err := r.Get(ctx, key, deployment); err != nil {
+func (r *OperatorReconciler) deleteResource(ctx context.Context, obj client.Object, finalizer string) error {
+	key := client.ObjectKey{Namespace: obj.GetNamespace(), Name: obj.GetName()}
+	err := r.Get(ctx, key, obj)
+	if err != nil {
 		if errors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	if controllerutil.RemoveFinalizer(obj, finalizer) {
+		if err := r.Update(ctx, obj); err != nil {
 			return err
 		}
 	}
 
-	if controllerutil.RemoveFinalizer(deployment, operatorv1.OperatorFinalizer+"/server") {
-		if err := r.Update(ctx, deployment); err != nil {
-			return err
-		}
-	}
-
-	err := r.Delete(ctx, deployment)
+	err = r.Delete(ctx, obj)
 	if err != nil {
 		return err
 	}
@@ -154,84 +179,109 @@ func (r *OperatorReconciler) deleteServerDeployment(ctx context.Context, operato
 	return nil
 }
 
-func (r *OperatorReconciler) deleteServerService(ctx context.Context, operator *operatorv1.Operator) error {
-	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-server"}
-	service := &corev1.Service{}
+/*
+	func (r *OperatorReconciler) deleteServerDeployment(ctx context.Context, operator *operatorv1.Operator) error {
+		key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-server"}
+		deployment := &appsv1.Deployment{}
 
-	if err := r.Get(ctx, key, service); err != nil {
-		if errors.IsNotFound(err) {
+		if err := r.Get(ctx, key, deployment); err != nil {
+			if errors.IsNotFound(err) {
+				return err
+			}
+		}
+
+		if controllerutil.RemoveFinalizer(deployment, operatorv1.OperatorFinalizer+"/server") {
+			if err := r.Update(ctx, deployment); err != nil {
+				return err
+			}
+		}
+
+		err := r.Delete(ctx, deployment)
+		if err != nil {
 			return err
 		}
 
 		return nil
 	}
 
-	if controllerutil.RemoveFinalizer(service, operatorv1.OperatorFinalizer+"/server-service") {
-		if err := r.Update(ctx, service); err != nil {
-			return err
-		}
-	}
+	func (r *OperatorReconciler) deleteServerService(ctx context.Context, operator *operatorv1.Operator) error {
+		key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-server"}
+		service := &corev1.Service{}
 
-	err := r.Delete(ctx, service)
-	if err != nil {
-		return err
-	}
+		if err := r.Get(ctx, key, service); err != nil {
+			if errors.IsNotFound(err) {
+				return err
+			}
 
-	return nil
-}
-
-func (r *OperatorReconciler) deleteFrontendDeployment(ctx context.Context, operator *operatorv1.Operator) error {
-	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-frontend"}
-	deployment := &appsv1.Deployment{}
-
-	if err := r.Get(ctx, key, deployment); err != nil {
-		if errors.IsNotFound(err) {
 			return nil
 		}
 
-		return err
-	}
+		if controllerutil.RemoveFinalizer(service, operatorv1.OperatorFinalizer+"/server-service") {
+			if err := r.Update(ctx, service); err != nil {
+				return err
+			}
+		}
 
-	if controllerutil.RemoveFinalizer(deployment, operatorv1.OperatorFinalizer+"/frontend") {
-		if err := r.Update(ctx, deployment); err != nil {
+		err := r.Delete(ctx, service)
+		if err != nil {
 			return err
 		}
+
+		return nil
 	}
 
-	err := r.Delete(ctx, deployment)
-	if err != nil {
-		return err
-	}
+	func (r *OperatorReconciler) deleteFrontendDeployment(ctx context.Context, operator *operatorv1.Operator) error {
+		key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-frontend"}
+		deployment := &appsv1.Deployment{}
 
-	return nil
-}
+		if err := r.Get(ctx, key, deployment); err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
 
-func (r *OperatorReconciler) deleteFrontendService(ctx context.Context, operator *operatorv1.Operator) error {
-	key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-frontend"}
-	service := &corev1.Service{}
-
-	if err := r.Get(ctx, key, service); err != nil {
-		if errors.IsNotFound(err) {
-			return nil
-		}
-
-		return err
-	}
-
-	if controllerutil.RemoveFinalizer(service, operatorv1.OperatorFinalizer+"/frontend-service") {
-		if err := r.Update(ctx, service); err != nil {
 			return err
 		}
+
+		if controllerutil.RemoveFinalizer(deployment, operatorv1.OperatorFinalizer+"/frontend") {
+			if err := r.Update(ctx, deployment); err != nil {
+				return err
+			}
+		}
+
+		err := r.Delete(ctx, deployment)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	err := r.Delete(ctx, service)
-	if err != nil {
-		return err
+	func (r *OperatorReconciler) deleteFrontendService(ctx context.Context, operator *operatorv1.Operator) error {
+		key := client.ObjectKey{Namespace: operator.Namespace, Name: operator.Name + "-frontend"}
+		service := &corev1.Service{}
+
+		if err := r.Get(ctx, key, service); err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
+
+			return err
+		}
+
+		if controllerutil.RemoveFinalizer(service, operatorv1.OperatorFinalizer+"/frontend-service") {
+			if err := r.Update(ctx, service); err != nil {
+				return err
+			}
+		}
+
+		err := r.Delete(ctx, service)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	}
-
-	return nil
-}
-
+*/
 func (r *OperatorReconciler) createOrUpdateServerDeployment(ctx context.Context, operator *operatorv1.Operator) error {
 	replicas := operator.Spec.Replicas
 

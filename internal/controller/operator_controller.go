@@ -156,7 +156,7 @@ func (r *OperatorReconciler) reconcileDelete(ctx context.Context, operator *oper
 }
 
 func (r *OperatorReconciler) deleteResource(ctx context.Context, obj client.Object, finalizer string) error {
-	key := client.ObjectKey{Namespace: obj.GetNamespace(), Name: obj.GetName()}
+	key := client.ObjectKeyFromObject(obj)
 	err := r.Get(ctx, key, obj)
 	if err != nil {
 		if errors.IsNotFound(err) {

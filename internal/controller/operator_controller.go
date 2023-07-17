@@ -149,8 +149,11 @@ func (r *OperatorReconciler) reconcileDelete(ctx context.Context, operator *oper
 		return err
 	}
 
-	// remove finalizer from operator CRD
-	controllerutil.RemoveFinalizer(operator, operatorv1.OperatorFinalizer)
+	if controllerutil.RemoveFinalizer(operator, operatorv1.OperatorFinalizer) {
+		if err := r.Update(ctx, operator); err != nil {
+			return err
+		}
+	}
 
 	return r.Update(ctx, operator)
 }

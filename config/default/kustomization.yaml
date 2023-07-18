@@ -1,8 +1,8 @@
 # Adds namespace to all resources.
-namespace: default
+namespace: test
 
-apiVersion: operator.my.domain/v1
-kind: Operator
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
 
 # Value of this field is prepended to the
 # names of all resources, e.g. a deployment named

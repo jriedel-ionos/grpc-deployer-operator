@@ -1,0 +1,34 @@
+run:
+    skip-files:
+        - cmd/main.go
+linters:
+  enable:
+    - bodyclose
+    - dupl
+    - gci
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofumpt
+    - goimports
+    - lll
+    - loggercheck
+    - misspell
+    - nilerr
+    - nosprintfhostport
+    - revive
+    - stylecheck
+    - unconvert
+    - unparam
+    - whitespace
+    - importas
+linters-settings:
+  importas:
+    no-unaliased: true
+    alias:
+      - pkg: k8s.io/api/(\w+)/(v[\w\d]+)
+        alias: $1$2
+      - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
+        alias: metav1
+      - pkg: k8s.io/client-go/kubernetes/typed/core/v1
+        alias: typedcorev1

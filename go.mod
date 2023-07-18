@@ -1,4 +1,4 @@
-module grpc-deployer-operator
+module github.com/jriedel-ionos/grpc-deployer-operator
 
 go 1.20
 

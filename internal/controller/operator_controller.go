@@ -18,18 +18,19 @@ package controller
 
 import (
 	"context"
-	v1 "k8s.io/api/apps/v1"
-	v12 "k8s.io/api/core/v1"
+	"fmt"
+
+	operatorv1 "github.com/jriedel-ionos/grpc-deployer-operator/api/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	operatorv1 "grpc-deployer-operator/api/v1"
 )
 
 // OperatorReconciler reconciles a Operator object
@@ -41,6 +42,8 @@ type OperatorReconciler struct {
 //+kubebuilder:rbac:groups=operator.my.domain,resources=operators,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=operator.my.domain,resources=operators/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=operator.my.domain,resources=operators/finalizers,verbs=update
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -52,7 +55,8 @@ type OperatorReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Operator")
 
 	operator := &operatorv1.Operator{}
 	if err := r.Get(ctx, req.NamespacedName, operator); err != nil {
@@ -65,142 +69,286 @@ func (r *OperatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if !operator.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.handleDeletion(ctx, operator)
-	}
+		// reconcile delete
+		if err := r.reconcileDelete(ctx, operator); err != nil {
+			return ctrl.Result{}, err
+		}
 
-	deployment := v1.Deployment{}
-	err := r.Get(ctx, req.NamespacedName, &deployment)
-	if err != nil && errors.IsNotFound(err) {
-		// deployment does not exist, create
-		return r.createDeployment(ctx, operator)
-	} else if err != nil {
-		// error getting deployment
-		return ctrl.Result{}, err
-	}
-
-	// deployment exists, check updates
-	return r.updateDeployment(ctx, *operator, &deployment)
-}
-
-func (r *OperatorReconciler) handleDeletion(ctx context.Context, operator *operatorv1.Operator) (ctrl.Result, error) {
-	deployment := v1.Deployment{}
-	deploymentName := types.NamespacedName{
-		Namespace: operator.Namespace,
-		Name:      operator.Name,
-	}
-
-	err := r.Get(ctx, deploymentName, &deployment)
-	if err != nil && errors.IsNotFound(err) {
-		// deployment does not exist, do nothing
 		return ctrl.Result{}, nil
-	} else if err != nil {
-		// error getting deployment
-		return ctrl.Result{}, err
 	}
 
-	// delete it actually
-	if err := r.Delete(ctx, &deployment); err != nil {
-		// error deleting deployment
-		return ctrl.Result{}, err
-	}
-
-	operator.SetFinalizers([]string{})
-	if err := r.Update(ctx, operator); err != nil {
-		// error updating CR
+	if err := r.reconcileEnsure(ctx, operator); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *OperatorReconciler) createDeployment(ctx context.Context, operator *operatorv1.Operator) (ctrl.Result, error) {
-	deployment := v1.Deployment{
+func (r *OperatorReconciler) reconcileEnsure(ctx context.Context, operator *operatorv1.Operator) error {
+	if controllerutil.AddFinalizer(operator, operatorv1.OperatorFinalizer) {
+		if err := r.Update(ctx, operator); err != nil {
+			return err
+		}
+	}
+
+	if err := r.createOrUpdateServerDeployment(ctx, operator); err != nil {
+		return err
+	}
+
+	if err := r.createOrUpdateServerService(ctx, operator); err != nil {
+		return err
+	}
+
+	if err := r.createOrUpdateFrontendDeployment(ctx, operator); err != nil {
+		return err
+	}
+
+	return r.createOrUpdateFrontendService(ctx, operator)
+}
+
+func (r *OperatorReconciler) reconcileDelete(ctx context.Context, operator *operatorv1.Operator) error {
+	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: operator.Namespace,
-			Name:      operator.Name,
+			Name:      operator.Name + "-server",
 		},
-		Spec: v1.DeploymentSpec{
-			Replicas: &operator.Spec.Replicas,
+	}
+
+	if err := r.deleteResource(ctx, deployment, operatorv1.OperatorFinalizer+"/server"); err != nil {
+		return err
+	}
+
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: operator.Namespace,
+			Name:      operator.Name + "-server",
+		},
+	}
+
+	if err := r.deleteResource(ctx, service, operatorv1.OperatorFinalizer+"/server-service"); err != nil {
+		return err
+	}
+
+	frontendDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: operator.Namespace,
+			Name:      operator.Name + "-frontend",
+		},
+	}
+
+	if err := r.deleteResource(ctx, frontendDeployment, operatorv1.OperatorFinalizer+"/frontend"); err != nil {
+		return err
+	}
+
+	frontendService := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: operator.Namespace,
+			Name:      operator.Name + "-frontend",
+		},
+	}
+
+	if err := r.deleteResource(ctx, frontendService, operatorv1.OperatorFinalizer+"/frontend-service"); err != nil {
+		return err
+	}
+
+	if controllerutil.RemoveFinalizer(operator, operatorv1.OperatorFinalizer) {
+		if err := r.Update(ctx, operator); err != nil {
+			return err
+		}
+	}
+
+	return r.Update(ctx, operator)
+}
+
+func (r *OperatorReconciler) deleteResource(ctx context.Context, obj client.Object, finalizer string) error {
+	key := client.ObjectKeyFromObject(obj)
+	err := r.Get(ctx, key, obj)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	if controllerutil.RemoveFinalizer(obj, finalizer) {
+		if err := r.Update(ctx, obj); err != nil {
+			return err
+		}
+	}
+
+	err = r.Delete(ctx, obj)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *OperatorReconciler) createOrUpdateServerDeployment(ctx context.Context, operator *operatorv1.Operator) error {
+	replicas := operator.Spec.Replicas
+
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      operator.Name + "-server",
+			Namespace: operator.Namespace,
+		},
+	}
+
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
+		controllerutil.AddFinalizer(deployment, operatorv1.OperatorFinalizer+"/server")
+
+		value := corev1.EnvVar{Name: "TEST"}
+
+		value.Value = operator.Spec.ReturnValue
+
+		deployment.Spec = appsv1.DeploymentSpec{
+			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app": operator.Name,
+					"app": operator.Name + "-server",
 				},
 			},
-			Template: v12.PodTemplateSpec{
+			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app": operator.Name,
+						"app": operator.Name + "-server",
 					},
 				},
-				Spec: v12.PodSpec{
-					Containers: []v12.Container{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
 						{
 							Name:  "grpc-server",
 							Image: "ghcr.io/jriedel-ionos/rampup-challenge-grpc/server:latest",
-							Ports: []v12.ContainerPort{
+							Ports: []corev1.ContainerPort{
 								{
-									ContainerPort: operator.Spec.Port,
+									ContainerPort: 8080,
+									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							Env: []v12.EnvVar{
+							Env: []corev1.EnvVar{value},
+						},
+					},
+				},
+			},
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *OperatorReconciler) createOrUpdateServerService(ctx context.Context, operator *operatorv1.Operator) error {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      operator.Name + "-server",
+			Namespace: operator.Namespace,
+		},
+	}
+
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
+		controllerutil.AddFinalizer(service, operatorv1.OperatorFinalizer+"/server-service")
+		service.Spec = corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": operator.Name + "-server",
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       8080,
+					TargetPort: intstr.FromInt(8080),
+				},
+			},
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *OperatorReconciler) createOrUpdateFrontendDeployment(ctx context.Context,
+	operator *operatorv1.Operator,
+) error {
+	replicas := operator.Spec.Replicas
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      operator.Name + "-frontend",
+			Namespace: operator.Namespace,
+		},
+	}
+
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
+		controllerutil.AddFinalizer(deployment, operatorv1.OperatorFinalizer+"/frontend")
+		deployment.Spec = appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": operator.Name + "-frontend",
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": operator.Name + "-frontend",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "grpc-frontend",
+							Image: "ghcr.io/jriedel-ionos/rampup-challenge-grpc/frontend:latest",
+							Ports: []corev1.ContainerPort{
 								{
-									Name:  "TEST",
-									Value: operator.Spec.ReturnValue,
+									ContainerPort: 8081,
+								},
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name:  "TARGET",
+									Value: fmt.Sprintf("%s.%s.svc.cluster.local:8080", operator.Name+"-server", operator.Namespace),
 								},
 							},
 						},
 					},
 				},
 			},
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *OperatorReconciler) createOrUpdateFrontendService(ctx context.Context, operator *operatorv1.Operator) error {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      operator.Name + "-frontend",
+			Namespace: operator.Namespace,
 		},
 	}
 
-	// set controller reference
-	if err := ctrl.SetControllerReference(operator, &deployment, r.Scheme); err != nil {
-		// error setting controller reference
-		return ctrl.Result{}, err
-	}
-
-	// create deployment
-	if err := r.Create(ctx, &deployment); err != nil {
-		// error creating deployment
-		return ctrl.Result{}, err
-	}
-
-	// mark CR as deployed
-	operator.Status.Deployed = true
-	if err := r.Status().Update(ctx, operator); err != nil {
-		// error updating CR status
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{}, nil
-}
-
-func (r *OperatorReconciler) updateDeployment(ctx context.Context, operator operatorv1.Operator, deployment *v1.Deployment) (ctrl.Result, error) {
-	if *deployment.Spec.Replicas != operator.Spec.Replicas {
-		// update replica number
-		deployment.Spec.Replicas = &operator.Spec.Replicas
-
-		// update deployment
-		if err := r.Update(ctx, deployment); err != nil {
-			// error updating deployment
-			return ctrl.Result{}, err
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, service, func() error {
+		controllerutil.AddFinalizer(service, operatorv1.OperatorFinalizer+"/frontend-service")
+		service.Spec = corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": operator.Name + "-frontend",
+			},
+			Type: corev1.ServiceTypeLoadBalancer,
+			Ports: []corev1.ServicePort{
+				{
+					Port:       8081,
+					TargetPort: intstr.FromInt(8081),
+				},
+			},
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	if deployment.Spec.Template.Spec.Containers[0].Env[0].Value != operator.Spec.ReturnValue {
-		// update return value
-		deployment.Spec.Template.Spec.Containers[0].Env[0].Value = operator.Spec.ReturnValue
-
-		// update deployment
-		if err := r.Update(ctx, deployment); err != nil {
-			// error updating deployment
-			return ctrl.Result{}, err
-		}
-	}
-
-	return ctrl.Result{}, nil
+	return r.Client.Status().Update(ctx, operator)
 }
 
 // SetupWithManager sets up the controller with the Manager.

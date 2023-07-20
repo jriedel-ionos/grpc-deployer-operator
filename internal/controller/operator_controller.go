@@ -335,11 +335,11 @@ func (r *OperatorReconciler) createOrUpdateFrontendService(ctx context.Context, 
 			Selector: map[string]string{
 				"app": operator.Name + "-frontend",
 			},
-			Type: corev1.ServiceTypeLoadBalancer,
+			Type: corev1.ServiceTypeNodePort,
 			Ports: []corev1.ServicePort{
 				{
-					Port:       8081,
-					TargetPort: intstr.FromInt(8081),
+					Port:     8081,
+					NodePort: 31888,
 				},
 			},
 		}
